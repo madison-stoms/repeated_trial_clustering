@@ -1,13 +1,17 @@
 
 # Stage 1 Mstep: estimate pi and mu
-Mstep = function(Y, ID, trial, trialind, t, cov.knots, delta) {
+Mstep = function(dat, cov.knots, delta) {
+  
+  # extract delta elements
+  tau = delta$tau; K = ncol(tau)
   
   # extract elements
-  tau = delta$tau; m = length(trialind); p = ncol(Y); n = length(unique(ID))
-  K = ncol(tau); L = length(unique(trialind))
+  m = length(unique(dat$trial)); n = length(unique(dat$subj)); 
+  L = length(unique(dat$trialclus)); p = length(unique(dat$t))
+  trialclus = sort(unique(trialclus))
   
   # calculate rho
-  v = as.data.frame(model.matrix(~ -1 + factor(trialind)))
+  v = as.data.frame(model.matrix(~ -1 + factor(trialclus)))
   vsum = colSums(v)
   rho = vsum / m
   

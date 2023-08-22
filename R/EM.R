@@ -1,18 +1,16 @@
 
 # EM Algorithm 
-EM = function(Y, ID, trial, trialind, K, stop, t, cov.knots) {
+EM = function(dat, K, stop, cov.knots) {
   
   # extract elements
-  m = length(unique(trial)); n = length(unique(ID)); L = length(unique(trialind)); p = length(t)
-  trialind = trialind[1:m]
+  m = length(unique(dat$trial)); n = length(unique(dat$subj)); 
+  L = length(unique(dat$trialclus)); p = length(unique(dat$t))
+  trialclus = sort(unique(dat$trialclus))
   
   # initialize delta with first trial of every observation
-  
-  Yclus = as_tibble(Y) %>%
-    mutate(ID = ID, trial = trial) %>%
-    pivot_longer(cols = -c(ID, trial), names_to = "time", values_to = "val") %>%
-    pivot_wider(id_cols = c(ID, trial, time), names_from = ID, values_from = val, names_prefix = "ID") %>%
-    dplyr::select(-c(trial, time)) %>%
+  Yclus = dat %>%
+    pivot_wider(id_cols = c(trial, t), names_from = subj, values_from = y, names_prefix = "subj") %>%
+    dplyr::select(-c(trial, t)) %>%
     as.matrix() %>% t()
   
   clus.initial = kmeans(Yclus, K)$cluster
@@ -22,19 +20,19 @@ EM = function(Y, ID, trial, trialind, K, stop, t, cov.knots) {
   # define initial clusters and format
   clus = max.col(delta.initial$tau)
   cluslong = rep(clus, each = m)
-  trialindlong = rep(trialind, n)
+  trialcluslong = rep(trialclus, n)
   
   # calculate rho
-  v = as.data.frame(model.matrix(~ -1 + factor(trialind)))
+  v = as.data.frame(model.matrix(~ -1 + factor(trialclus)))
   vsum = colSums(v)
   rho = vsum / m
   
   # first two E and M steps
-  theta = Mstep(Y, ID, trial, trialind, t, cov.knots, delta.initial)
-  delta = Estep(Y, ID, trial, trialind, theta)
+  theta = Mstep(dat, cov.knots, delta.initial)
+  delta = Estep(dat, theta)
   
-  theta = Mstep(Y, ID, trial, trialind, t, cov.knots, delta)
-  delta = Estep(Y, ID, trial, trialind, theta)
+  theta = Mstep(dat, cov.knots, delta)
+  delta = Estep(dat, theta)
   deltaold = delta
   
   # start EM loop
@@ -42,8 +40,8 @@ EM = function(Y, ID, trial, trialind, K, stop, t, cov.knots) {
   while (tol > stop & iter < 10) {
     
     # E and M steps
-    theta = Mstep(Y, ID, trial, trialind, t, cov.knots, delta)
-    delta = Estep(Y, ID, trial, trialind, theta)
+    theta = Mstep(dat, cov.knots, delta)
+    delta = Estep(dat, theta)
     
     # check convergence
     tol = max(abs(deltaold$tau - delta$tau)) 

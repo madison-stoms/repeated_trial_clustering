@@ -1,12 +1,18 @@
 # Stage 1 Estep: estimate tau
-Estep = function(Y, ID, trial, trialind, theta) {
+Estep = function(dat, theta) {
   
-  # extract elements 
+  # extract theta elements 
   mu = theta$mu; pi = theta$pi; 
   sigma2 = theta$sigma2; W = theta$W; lambda = theta$lambda
-  m = length(trialind); p = ncol(Y); n = length(unique(ID))
-  K = length(pi); L = length(unique(trialind))
+  K = length(pi)
   
+  # extract elements
+  m = length(unique(dat$trial)); n = length(unique(dat$subj)); 
+  L = length(unique(dat$trialclus)); p = length(unique(dat$t))
+  trialclus = sort(unique(trialclus))
+  
+  Ywide = dat %>% 
+    pivot_wider(id_cols = c(subj, trial), names_from = t, values_from = y, names_prefix = "t")
   
   # loop for variances and inverses
   Sig = list(); Siginv = list(); Sigdet = list()
@@ -58,10 +64,10 @@ Estep = function(Y, ID, trial, trialind, theta) {
       for(j in 1:m) {
         
         # identify trial type
-        l = trialind[j]
+        l = trialclus[j]
         
         # find c comps
-        Yij = Y[which(ID == i & trial == j),]
+        Yij = dat %>% filter(subj == i, trial == j) %>% pull(y)
         cvec[j] = t(Yij - mu[[k]][,l]) %*% Siginv[[k]][[l]] %*% (Yij - mu[[k]][,l])
         
       }
@@ -74,13 +80,18 @@ Estep = function(Y, ID, trial, trialind, theta) {
   # start responsibilty loop
   tau = matrix(NA, nrow = n, ncol = K)
   for(i in 1:n) {
-    m1 = sum(trialind == 1); m2 = sum(trialind == 2)
+
+    m = c()
+    for(l in 1:L) { m[l] = sum(trialclus == l) }
     
     A = matrix(NA, nrow = K, ncol = K)
     for(q in 1:K) {
       for(s in 1:K) {
         
-        A[q,s] = B[[1]][q,s]^(-m1/2) * B[[2]][q,s]^(-m2/2) * exp(C[i,s]/2 - C[i,q]/2) * (pi[q]/pi[s])
+        bprod = 1
+        for(l in 1:L) { brpod = B[[l]][q,s]^(-m[l]/2) * bprod }
+        
+        A[q,s] = bprod * exp(C[i,s]/2 - C[i,q]/2) * (pi[q]/pi[s])
         
       } }
     

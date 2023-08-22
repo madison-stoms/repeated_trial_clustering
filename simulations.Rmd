@@ -1,0 +1,46 @@
+---
+title: "Simulations"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# source functions
+files.sources = paste0("./R/", list.files("./R"))
+sapply(files.sources, source)
+
+```
+
+
+```{r}
+# define components
+K = 2; L = 2; r = 2; t = 1:100/100
+
+# define true mu
+mu.t = list()
+mu.t[[1]] = cbind(cos(t/2), cos(t/2))
+mu.t[[2]] = cbind(cos(t/2), cos(t/2))
+
+# define true W
+pol = polym(t, degree = 8)
+W.t = list()
+W.t[[1]] = list(cbind(pol[,2], pol[,1]), cbind(pol[,4], pol[,3]))
+W.t[[2]] = list(cbind(pol[,5], pol[,6]), cbind((pol[,8]), pol[,7]))
+
+# define true lambda
+lambda.t = list()
+lambda.t[[1]] = cbind(c(1^2, 0.8^2), c(1^2, 0.8^2))
+lambda.t[[2]] = cbind(c(1^2, 0.8^2), c(1^2, 0.8^2))
+
+# simulate data
+sims = simulate_data(n = 10, m = 4, t = 1:100/100, 
+              pi = c(0.5,0.5), rho = c(0.5, 0.5), 
+              mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.15)
+
+dat = sims$X
+
+EM(dat, 2, 0.000001, 10)
+```
+
+
