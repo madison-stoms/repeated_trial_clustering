@@ -1,24 +1,31 @@
 
 # Stage 1 Mstep: estimate pi and mu
-Mstep = function(dat, cov.knots, delta) {
+Mstep = function(Ylong, t, cov.knots, mu.knots, delta) {
   
   # extract delta elements
   tau = delta$tau; K = ncol(tau)
   
   # extract elements
-  m = length(unique(dat$trial)); n = length(unique(dat$subj)); 
-  L = length(unique(dat$trialclus)); p = length(unique(dat$t))
-  trialclus = sort(unique(trialclus))
+  m = length(unique(Ylong$trial)); n = length(unique(Ylong$subj)); 
+  L = length(unique(Ylong$trialclus)); p = length(t)
+  trialclus = Ylong %>% pull(trialclus) %>% .[1:m]
+  trialcluslong = Ylong$trialclus
+  
+  # extract just y vals
+  Y = Ylong %>%
+    dplyr::select(-c(subj, trialclus, trial)) %>% as.matrix()
   
   # calculate rho
   v = as.data.frame(model.matrix(~ -1 + factor(trialclus)))
   vsum = colSums(v)
-  rho = vsum / m
+  rho = vsum / sum(vsum)
   
   
   # update pi
   tausum = colSums(tau)
   pi = tausum / n
+  for(k in 1:K) { ifelse(pi[k] <= 3e-23, 0.01, pi[k]) }
+  pi = pi / sum(pi)
   
   
   # update mu
@@ -36,7 +43,7 @@ Mstep = function(dat, cov.knots, delta) {
     muraw[[k]] = mutemp
     
   }
-  mu = smooth_mean(muraw, K = K, L = L, t = t)
+  mu = smooth_mean(muraw, K = K, L = L, t = t, nknots = mu.knots)
   
   
   
@@ -63,8 +70,29 @@ Mstep = function(dat, cov.knots, delta) {
       evals = decomp$values
       efun = decomp$vectors
       
+      # if(is.complex(evals[1])) { return(Sraw) }
+      
+      nknots = cov.knots
+      while(is.complex(evals[1])) {
+        
+        nknots = nknots - 1
+        if(nknots < 4) { break }
+      #  print(str_c("testing cov.knots = ", nknots))
+        
+        # smooth covariance
+        mod = fbps.cov(Sraw, knots = nknots)
+        S = mod$cov
+        sigma2kl = mod$var
+        
+        # decompose smoothed S
+        decomp = eigen(S)
+        evals = decomp$values
+        efun = decomp$vectors
+        
+      }
+      
       var_prop =  cumsum(evals) / sum(evals)
-      r = min(which(var_prop > 0.96))
+      r = min(which(var_prop > 0.97))
       
       lambdatemp[[l]] = evals[1:r]
       Wtemp[[l]] = efun[,1:r] 
@@ -81,8 +109,6 @@ Mstep = function(dat, cov.knots, delta) {
     W[[k]] = Wtemp; lambda[[k]] = lambdatemp
   }
   
-  
-  #return(efun)
   return(list(pi = pi, mu = mu, W = W, lambda = lambda, sigma2 = sigma2))
   
 }

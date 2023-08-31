@@ -1,6 +1,6 @@
 
 # input estimated mean and smooth using Gaussian kernel
-smooth_mean = function(mu, K, L, t) {
+smooth_mean = function(mu, K, L, t, nknots) {
   
   # loop over mu elements 
   musmooth = list()
@@ -9,7 +9,7 @@ smooth_mean = function(mu, K, L, t) {
     for(l in 1:L){
       
       temp = mu[[k]][,l]
-      mutemp[,l] = smooth.spline(t, temp, nknots = 5,  cv = TRUE)$y
+      mutemp[,l] = smooth.spline(t, temp, nknots = nknots,  cv = TRUE)$y
       
     }
     musmooth[[k]] = mutemp

@@ -1,9 +1,9 @@
 
-# simulate clustered data
+# simulate clustered data using single PCs
 simulate_data = function(n, m, t, pi = c(0.5,0.5), rho = c(0.5, 0.5), mu, W, lambda, sigma2) {
   
   # define indicies
-  K = length(pi); L = length(rho); r = ncol(W[[1]][[1]]); p = length(t)
+  K = length(pi); L = length(rho); p = length(t)
   
   # construct true cluster assignments
   clus = c()
@@ -18,7 +18,6 @@ simulate_data = function(n, m, t, pi = c(0.5,0.5), rho = c(0.5, 0.5), mu, W, lam
   X = tibble(); iter = 1
   for(i in 1:n ) {
     
-    eta = rnorm(r, 0, 9)
     for(j in 1:m ) {
       
       # define group
@@ -26,7 +25,7 @@ simulate_data = function(n, m, t, pi = c(0.5,0.5), rho = c(0.5, 0.5), mu, W, lam
       jj = tind[j]
       
       # calculate curve
-      temp = as.numeric(mu[[ii]][,jj] + W[[ii]][[jj]] %*% matrix(mvrnorm(1, eta, diag(sqrt(lambda [[ii]][,jj]))), nrow = r ) + rnorm(p, 0, sqrt(sigma2)))
+      temp = as.numeric(mu[[ii]][,jj] + W[[ii]][[jj]] * rnorm(1, 0, sqrt(lambda[[ii]][,jj])) + rnorm(p, 0, sqrt(sigma2)))
       X = rbind(X, tibble(ID = iter, subj = i, trial = j, subjclus = ii, trialclus = jj, t = t, y = temp))
       
       iter = iter + 1

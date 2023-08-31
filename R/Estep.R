@@ -1,5 +1,5 @@
 # Stage 1 Estep: estimate tau
-Estep = function(dat, theta) {
+Estep = function(Ylong, t, theta) {
   
   # extract theta elements 
   mu = theta$mu; pi = theta$pi; 
@@ -7,12 +7,14 @@ Estep = function(dat, theta) {
   K = length(pi)
   
   # extract elements
-  m = length(unique(dat$trial)); n = length(unique(dat$subj)); 
-  L = length(unique(dat$trialclus)); p = length(unique(dat$t))
-  trialclus = sort(unique(trialclus))
+  m = length(unique(Ylong$trial)); n = length(unique(Ylong$subj)); 
+  L = length(unique(Ylong$trialclus)); p = length(t)
+  trialcluslong = Ylong$trialclus
+  trialclus = trialcluslong[1:m]
   
-  Ywide = dat %>% 
-    pivot_wider(id_cols = c(subj, trial), names_from = t, values_from = y, names_prefix = "t")
+  # extract just y vals
+  Y = Ylong %>%
+    dplyr::select(-c(subj, trialclus, trial)) %>% as.matrix()
   
   # loop for variances and inverses
   Sig = list(); Siginv = list(); Sigdet = list()
@@ -39,71 +41,95 @@ Estep = function(dat, theta) {
   }
   
   
-  
-  # find B matrix
-  B = list()
-  for(l in 1:L) {
-    
-    bmat = matrix(NA, nrow = K, ncol = K)
-    for(q in 1:K) { # dummy index
-      for(s in 1:K) { # dummy index
-        
-        bmat[q,s] = Sigdet[[q]][[l]] / Sigdet[[s]][[l]]
-        
-      } }
-    B[[l]] = bmat
-    
-  }
-  
-  
-  # find C matrix
-  C = matrix(NA, nrow = n, ncol = K)
+  # find eta matrix for responsibility loop
+  eta = matrix(NA, nrow = n, ncol = K)
   for(k in 1:K) {
     for(i in 1:n) {
-      cvec = c()
+      etavec = c()
       for(j in 1:m) {
         
         # identify trial type
         l = trialclus[j]
         
         # find c comps
-        Yij = dat %>% filter(subj == i, trial == j) %>% pull(y)
-        cvec[j] = t(Yij - mu[[k]][,l]) %*% Siginv[[k]][[l]] %*% (Yij - mu[[k]][,l])
+        Yij = Ylong %>% filter(subj == i, trial == j) %>% dplyr::select(-c(subj,trialclus,trial)) %>% .[1,] %>% as.numeric()
+        etavec[j] = matrix(Yij - mu[[k]][,l], nrow = 1) %*% Siginv[[k]][[l]] %*% matrix(Yij - mu[[k]][,l], ncol = 1)
         
       }
-      C[i,k] = sum(cvec)
+      eta[i,k] = sum(etavec)
     }
   }
   
   
   
-  # start responsibilty loop
+  # start responsibility loop
   tau = matrix(NA, nrow = n, ncol = K)
-  for(i in 1:n) {
-
-    m = c()
-    for(l in 1:L) { m[l] = sum(trialclus == l) }
+  for(i in 1:n) { # start subj loop
     
-    A = matrix(NA, nrow = K, ncol = K)
-    for(q in 1:K) {
-      for(s in 1:K) {
-        
-        bprod = 1
-        for(l in 1:L) { brpod = B[[l]][q,s]^(-m[l]/2) * bprod }
-        
-        A[q,s] = bprod * exp(C[i,s]/2 - C[i,q]/2) * (pi[q]/pi[s])
-        
-      } }
+    # extract how many trials of each type
+    Lsum = c(); for(l in 1:L) { Lsum[l] = sum(trialclus == k) }
     
-    tau[i,] = 1 / colSums(A)
-    
+    for(k in 1:K) { # start cluster loop
+      tauinner = 0
+      for(c in 1:K) { # start inner cluster loop
+        if(c == k) next # skip when sum = 0
+        
+        # calculate prod over trials 
+        detprod = 1 
+        for(l in 1:L) { detprod = detprod * (Sigdet[[c]][[l]] / Sigdet[[k]][[l]])^(-Lsum[l]/2) }
+        
+        # calculate 1/tau[i,k]
+        tauinner = tauinner + ( pi[c]/pi[k] * exp((eta[i,k] - eta[i,c])/2) * detprod )
+        
+      }
+      if(tauinner == 0) { tauinner = 0.0000001 }
+      if(is.infinite(tauinner)) { tauinner = 9999999 }
+      tau[i,k] = 1 / tauinner
+    }
   }
-  
+
   # check for missingness and reinitialize
   tau = ifelse(is.na(tau), runif(1), tau)
   tau = tau / rowSums(tau)
   
+  
   return(list(tau = tau))
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

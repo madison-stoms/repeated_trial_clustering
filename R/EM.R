@@ -1,26 +1,29 @@
 
 # EM Algorithm 
-EM = function(dat, K, stop, cov.knots) {
+EM = function(dat, K, stop, cov.knots, mu.knots) {
+  
+  dat = dat %>%
+    arrange(subj, trial, t)
   
   # extract elements
   m = length(unique(dat$trial)); n = length(unique(dat$subj)); 
-  L = length(unique(dat$trialclus)); p = length(unique(dat$t))
-  trialclus = sort(unique(dat$trialclus))
+  L = length(unique(dat$trialclus)); t = unique(dat$t); p = length(t)
   
-  # initialize delta with first trial of every observation
-  Yclus = dat %>%
-    pivot_wider(id_cols = c(trial, t), names_from = subj, values_from = y, names_prefix = "subj") %>%
-    dplyr::select(-c(trial, t)) %>%
-    as.matrix() %>% t()
+  # format Y
+  Ylong = dat %>% 
+    pivot_wider(id_cols = c(subj, trialclus, trial), names_from = t, values_from = y, names_prefix = "t") 
   
-  clus.initial = kmeans(Yclus, K)$cluster
+  Y = Ylong %>% dplyr::select(-c(subj, trialclus, trial)) %>% as.matrix()
+  
+  trialclus = Ylong %>% pull(trialclus) %>% .[1:m]
+  trialcluslong = Ylong$trialclus
+  
+  #clus.initial = kmeans(Yclus, K)$cluster
+  clus.initial = sample(1:K, n, replace = TRUE)
+  #clus.initial = rep(1:K, each = n/2)
   tau.initial = as.data.frame(model.matrix(~ -1 + factor(clus.initial)))
+ # tau.initial = ifelse(tau.initial == 1, 0.7, 0.3)
   delta.initial = list(tau = tau.initial)
-  
-  # define initial clusters and format
-  clus = max.col(delta.initial$tau)
-  cluslong = rep(clus, each = m)
-  trialcluslong = rep(trialclus, n)
   
   # calculate rho
   v = as.data.frame(model.matrix(~ -1 + factor(trialclus)))
@@ -28,20 +31,23 @@ EM = function(dat, K, stop, cov.knots) {
   rho = vsum / m
   
   # first two E and M steps
-  theta = Mstep(dat, cov.knots, delta.initial)
-  delta = Estep(dat, theta)
+  theta = Mstep(Ylong, t, cov.knots, mu.knots, delta.initial)
+ # if(!is.list(theta)) { return(theta) }
+  delta = Estep(Ylong, t, theta)
   
-  theta = Mstep(dat, cov.knots, delta)
-  delta = Estep(dat, theta)
+  theta = Mstep(Ylong, t, cov.knots, mu.knots, delta)
+  delta = Estep(Ylong, t, theta)
   deltaold = delta
   
   # start EM loop
   tol = 100; iter = 0
-  while (tol > stop & iter < 10) {
+  while (tol > stop) {
     
+    if(iter > 10) { break }
+
     # E and M steps
-    theta = Mstep(dat, cov.knots, delta)
-    delta = Estep(dat, theta)
+    theta = Mstep(Ylong, t, cov.knots, mu.knots, delta)
+    delta = Estep(Ylong, t, theta)
     
     # check convergence
     tol = max(abs(deltaold$tau - delta$tau)) 
@@ -50,10 +56,14 @@ EM = function(dat, K, stop, cov.knots) {
     iter = iter + 1
     deltaold = delta
     
+   # print(iter)
+    
   }
   
   BIC_check = funBIC(Y, theta, rho, K = K, L = L, n = n, m = m)
   
-  return(list(delta = delta, theta = theta, BIC = BIC_check, clus.initial = clus.initial, iter = iter + 2))
+  return(list(clus = max.col(delta$tau), delta = delta, theta = theta, BIC = BIC_check, 
+              clus.initial = clus.initial, t = t, trialclus = trialclus, iter = iter + 2,
+              m = m, n = n, K = K, L = L, Y = Y, Ylong = Ylong))
   
 }
