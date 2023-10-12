@@ -1,25 +1,18 @@
 
 # Stage 1 Mstep: estimate pi and mu
-Mstep = function(Ylong, t, cov.knots, mu.knots, delta) {
+Mstep = function(Ywide, t, cov.knots, mu.knots, delta, rho) {
   
   # extract delta elements
   tau = delta$tau; K = ncol(tau)
   
   # extract elements
-  m = length(unique(Ylong$trial)); n = length(unique(Ylong$subj)); 
-  L = length(unique(Ylong$trialclus)); p = length(t)
-  trialclus = Ylong %>% pull(trialclus) %>% .[1:m]
-  trialcluslong = Ylong$trialclus
+  n = length(unique(Ywide$subj)); p = length(t)
+  L = length(unique(Ywide$trial_type))
+  subjs = unique(Ywide$subj)
   
   # extract just y vals
-  Y = Ylong %>%
-    dplyr::select(-c(subj, trialclus, trial)) %>% as.matrix()
-  
-  # calculate rho
-  v = as.data.frame(model.matrix(~ -1 + factor(trialclus)))
-  vsum = colSums(v)
-  rho = vsum / sum(vsum)
-  
+  Y = Ywide %>%
+    dplyr::select(-c(subj, trial_type, trial)) %>% as.matrix()
   
   # update pi
   tausum = colSums(tau)
@@ -27,73 +20,97 @@ Mstep = function(Ylong, t, cov.knots, mu.knots, delta) {
   for(k in 1:K) { ifelse(pi[k] <= 3e-23, 0.01, pi[k]) }
   pi = pi / sum(pi)
   
+  # calculate trial lengths
+  Jvec = Ywide %>% 
+    group_by(subj) %>%
+    summarise(J = n()) %>% ungroup() %>% pull(J)
   
-  # update mu
-  muraw = list()
+  # get trial type counts by subj
+  typesums = Ywide %>% 
+    group_by(subj, trial_type) %>%
+    summarise(n = n()) %>% ungroup()
+  
+  # calculate v for vlongs
+  v = as.data.frame(model.matrix(~ -1 + factor(Ywide$trial_type)))
+  
+  
+  # calculate denominators 
+  denom = list()
   for(k in 1:K) {
-    
-    # loop over trials
-    mutemp = matrix(NA, nrow = p, ncol = L)
+    denom_inner = list()
     for(l in 1:L) {
-      
-      taulong = rep(tau[,k], each = m); vlong = rep(v[,l], n)
-      mutemp[,l] = apply(Y * taulong * vlong, 2, sum) / (tausum[k] * vsum[l])
-      
+      inner = 0
+      for(i in 1:44) { 
+        typesumi = filter(typesums, subj == subjs[i], trial_type == l) %>% pull(n)
+        inner = inner + tau[i,k] * typesumi
+        if(is.nan(inner)) {stop(i)}
+      }
+      denom_inner[[l]] = inner
     }
-    muraw[[k]] = mutemp
-    
+    denom[[k]] = denom_inner
   }
-  mu = smooth_mean(muraw, K = K, L = L, t = t, nknots = mu.knots)
   
   
   
+  # # update mu
+  # muraw = list()
+  # for(k in 1:K) {
+  #   
+  #   taulong = c()
+  #   for(i in 1:n) {taulong = c(taulong, rep(tau[i,k], Jvec[i]))}
+  #   
+  #   # loop over trials
+  #   mutemp = matrix(NA, nrow = p, ncol = L)
+  #   for(l in 1:L) {
+  #     
+  #     vlong = v[,l]
+  #     mutemp[,l] = apply(Y * taulong * vlong, 2, sum) / denom[[k]][[l]]
+  #     
+  #   }
+  #   muraw[[k]] = mutemp
+  #   
+  # }
+  # mu = smooth_mean(muraw, K = K, L = L, t = t, nknots = mu.knots)
+  # 
+  # 
   
-  # estimate W and sigma2
-  W = list(); lambda = list(); sigma2 = 0
+  
+  # estimate mu, W, and sigma2
+  mu = list(); W = list(); lambda = list(); sigma2 = 0
   for(k in 1:K) {
     
-    Wtemp = list(); lambdatemp = list()
+    taulong = c()
+    for(i in 1:n) {taulong = c(taulong, rep(tau[i,k], Jvec[i]))}
+    
+    mutemp = matrix(NA, nrow = p, ncol = L); Wtemp = list(); lambdatemp = list()
     for(l in 1:L) {
+      
+      vlong = v[,l]
+      
+      # update mean
+      temp = apply(Y * taulong * vlong, 2, sum) / denom[[k]][[l]]
+      mutemp[,l] = smooth.spline(t, temp, nknots = mu.knots, cv = TRUE)$y
       
       # calculate weighted covariance
-      taulong = rep(tau[,k], each = m); vlong = rep(v[,l], n)
-      Yc = sweep(Y, 2, mu[[k]][,l], "-")
-      Sraw = (t(Yc * taulong * vlong) %*% Yc) / (pi[k] * n * rho[l] * m)
+      Yc = sweep(Y, 2, mutemp[,l], "-")
+      Sraw = (t(Yc * taulong * vlong) %*% Yc) / denom[[k]][[l]]
       
       # smooth covariance
       mod = fbps.cov(Sraw, knots = cov.knots)
       S = mod$cov
+      S = (S + t(S)) / 2
       sigma2kl = mod$var
       
       # decompose smoothed S
       decomp = eigen(S)
       evals = decomp$values
       efun = decomp$vectors
-      
-      # if(is.complex(evals[1])) { return(Sraw) }
-      
-      nknots = cov.knots
-      while(is.complex(evals[1])) {
-        
-        nknots = nknots - 1
-        if(nknots < 4) { break }
-      #  print(str_c("testing cov.knots = ", nknots))
-        
-        # smooth covariance
-        mod = fbps.cov(Sraw, knots = nknots)
-        S = mod$cov
-        sigma2kl = mod$var
-        
-        # decompose smoothed S
-        decomp = eigen(S)
-        evals = decomp$values
-        efun = decomp$vectors
-        
-      }
-      
+
+      # choose trunc
       var_prop =  cumsum(evals) / sum(evals)
       r = min(which(var_prop > 0.97))
       
+      # save results 
       lambdatemp[[l]] = evals[1:r]
       Wtemp[[l]] = efun[,1:r] 
       
@@ -101,16 +118,24 @@ Mstep = function(Ylong, t, cov.knots, mu.knots, delta) {
       if(is.null(dim(Wtemp[[l]]))) {
         Wtemp[[l]] = as.matrix(Wtemp[[l]], ncol = 1)}
       
-      
-      # weighted sum 
+      # update weighted sum 
       sigma2 = sigma2kl * pi[k] * rho[l] + sigma2
       
     }
-    W[[k]] = Wtemp; lambda[[k]] = lambdatemp
+    
+    mu[[k]] = mutemp; W[[k]] = Wtemp; lambda[[k]] = lambdatemp
+    
   }
   
   return(list(pi = pi, mu = mu, W = W, lambda = lambda, sigma2 = sigma2))
   
 }
+
+
+
+
+
+
+
 
 
