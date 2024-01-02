@@ -1,6 +1,6 @@
 
 # Stage 1 Mstep: estimate pi and mu
-Mstep = function(Ywide, t, cov.knots, mu.knots, delta, rho) {
+Mstep = function(Ywide, t, cov.knots, mu.knots, delta, rho, r = NULL) {
   
   # extract delta elements
   tau = delta$tau; K = ncol(tau)
@@ -23,16 +23,15 @@ Mstep = function(Ywide, t, cov.knots, mu.knots, delta, rho) {
   # calculate trial lengths
   Jvec = Ywide %>% 
     group_by(subj) %>%
-    summarise(J = n()) %>% ungroup() %>% pull(J)
+    summarise(J = n(), .groups = 'drop') %>% ungroup() %>% pull(J)
   
   # get trial type counts by subj
   typesums = Ywide %>% 
     group_by(subj, trial_type) %>%
-    summarise(n = n()) %>% ungroup()
+    summarise(n = n(), .groups = 'drop') %>% ungroup() 
   
   # calculate v for vlongs
   v = as.data.frame(model.matrix(~ -1 + factor(Ywide$trial_type)))
-  
   
   # calculate denominators 
   denom = list()
@@ -40,10 +39,11 @@ Mstep = function(Ywide, t, cov.knots, mu.knots, delta, rho) {
     denom_inner = list()
     for(l in 1:L) {
       inner = 0
-      for(i in 1:44) { 
+      for(i in 1:n) { 
+        if(filter(typesums, subj == subjs[i], trial_type == l) %>% nrow() == 0) { next }
         typesumi = filter(typesums, subj == subjs[i], trial_type == l) %>% pull(n)
         inner = inner + tau[i,k] * typesumi
-        if(is.nan(inner)) {stop(i)}
+        if(inner > 999999999) {inner = 999999999}
       }
       denom_inner[[l]] = inner
     }
@@ -106,9 +106,14 @@ Mstep = function(Ywide, t, cov.knots, mu.knots, delta, rho) {
       evals = decomp$values
       efun = decomp$vectors
 
-      # choose trunc
-      var_prop =  cumsum(evals) / sum(evals)
-      r = min(which(var_prop > 0.97))
+      # find r if not specified
+      if(is.null(r)) {
+        
+        # choose trunc
+        var_prop =  cumsum(evals) / sum(evals)
+        r = min(which(var_prop > 0.95))
+        
+      }
       
       # save results 
       lambdatemp[[l]] = evals[1:r]

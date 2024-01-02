@@ -1,0 +1,33 @@
+---
+title: "Bug"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("./face_smoothing.R")
+library(splines)
+
+```
+
+
+```{r}
+# load problematic covariance matrix
+load("./Sraw.Rdata")
+
+# smooth covariance
+mod = fbps.cov(Sraw, knots = 8)
+S = mod$cov
+S = (S + t(S)) / 2
+
+# decompose smoothed S
+decomp = eigen(S)
+efuns = decomp$vectors
+evals = decomp$values
+
+# evals are complex
+is.complex(evals[1])
+
+```
+

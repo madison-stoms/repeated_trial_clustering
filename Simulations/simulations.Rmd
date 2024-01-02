@@ -1,0 +1,446 @@
+---
+title: "Simulations"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+# source functions
+files.sources = paste0("../R/", list.files("../R"))
+sapply(files.sources, source)
+library(ggridges)
+library(refund)
+
+```
+
+
+```{r}
+
+# define components
+K = 2; L = 2; t = sort(sample(1:100/100, 50, replace = FALSE)); p = length(t)
+
+# define true W
+spline = bs(t, knots = (0:6/6))
+
+```
+
+
+# Same Means Different PCs
+
+### Define Setting
+
+```{r}
+
+# define Ws
+coef11 = c(0,0,1,1,0,0,0,0,0,0)
+temp = spline %*% coef11
+pc11 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+coef12 = c(0,0,0,0,1,1,0,0,0,0)
+temp = spline %*% coef12
+pc12 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+coef13 = c(0,0,0,0,0,1,1,0,0,0)
+temp = spline %*% coef13
+pc13 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+temp = rep(1,p)
+pc14 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+W.t = list()
+W.t[[1]] = list(cbind(pc11, pc13), cbind(pc12, pc14))
+W.t[[2]] = list(cbind(pc13, pc11), cbind(pc14, pc12))
+
+
+# define true mu
+mu.t = list()
+mu.t[[1]] = cbind(rep(1,p), rep(1,p))
+mu.t[[2]] = cbind(rep(1,p), rep(1,p))
+
+
+# define true lambda
+lambda.t = list()
+lambda.t[[1]] = list(c(6,2), c(6,2))
+lambda.t[[2]] = list(c(6,2), c(6,2))
+
+
+# # simulate data
+ sims = simulate_data(n = 50, m = 20, t = t,
+             pi = c(0.5,0.5), rho = c(0.5, 0.5),
+             mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.002)
+
+ sims$X %>%
+   mutate(subj = factor(subj),
+          trial_type = str_c("Condition ", trial_type),
+          subjclus = str_c("Cluster ", subjclus)) %>%
+   ggplot() +
+   geom_line(aes(x = t, y = y, group = interaction(subj, trial_type, trial)), alpha = 0.2, size = 0.4) +
+   facet_grid(cols = vars(trial_type), rows =  vars(subjclus)) +
+   theme_bw() +
+   theme(legend.position = "none",
+         legend.title = element_blank()) +
+   labs(x = "Time", y = "Simulated Activation") +
+   guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+ggsave("./Figures/simset1.png", width = 6, height = 4)
+
+```
+
+
+### Scenario 1: Exchangable clustering
+
+```{r, eval = FALSE}
+
+trialnum = c(10, 20, 40, 80); randlist = list()
+for(j in 1:length(trialnum)) {
+
+  for(i in 1:100) {
+
+    # simulate data
+    sims = simulate_data(n = 50, m = trialnum[j], t = t,
+                pi = c(0.5,0.5), rho = c(0.5, 0.5),
+                mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.002)
+
+    sm = sims$X %>%
+      pivot_wider(id_cols = c(subj, trial, trial_type),
+                  names_from = t, values_from = y, names_prefix = "t")
+
+    matsm = sm %>%
+      dplyr::select(-c(subj, trial, trial_type)) %>%
+      as.matrix()
+
+    fpca_sm = fpca.face(Y = matsm, pve = .95)
+
+    clusex = sm %>%
+      mutate(clusex = kmeans(fpca_sm$scores, 2)$cluster) %>%
+      dplyr::select(subj, trial, trial_type, clusex) %>%
+      group_by(subj) %>%
+      summarise(m = mean(clusex)) %>%
+      ungroup() %>%
+      mutate(clus = ifelse(m <= 1.5, 1, 2)) %>%
+      pull(clus)
+
+    randlist[[i]] = tibble(iter = i, trialnum = trialnum[j], 
+                           rand = rand.index(sims$clus, clusex),
+                           scenario = 1)
+    print(i)
+
+  }
+  randtib = do.call(rbind, randlist)
+  write_csv(randtib, str_c("./Results/ex_s1_m", j, ".csv"))
+
+}
+
+exdat = rbind(read_csv("./Results/simslist_ex_s1_m1.csv"),
+              read_csv("./Results/simslist_ex_s1_m2.csv"),
+              read_csv("./Results/simslist_ex_s1_m3.csv")) 
+
+```
+
+
+### Scenario 1: Iterate Across Trial Numbers
+
+```{r, eval = FALSE}
+
+trialnum = c(10, 20, 40, 80); randlist = list()
+for(j in 2:length(trialnum)) {
+
+  simslist = list()
+  for(i in 1:100) {
+
+    # simulate data
+    sims = simulate_data(n = 50, m = trialnum[j], t = t,
+                pi = c(0.5,0.5), rho = c(0.5, 0.5),
+                mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.002)
+
+    res = EM(sims$X, 2, 0.00001, cov.knots = 10, mu.knots = 10)
+
+    randlist[[i]] = tibble(iter = i, trialnum = trialnum[j],
+                           rand = rand.index(sims$clus, res$clus),
+                           scenario = 1)
+    print(i)
+
+  }
+  randtib = do.call(rbind, randlist)
+  write_csv(randtib, str_c("./Results/s1_m", j, ".csv"))
+
+}
+
+```
+
+
+
+### Scenario 1: Plot Results
+
+```{r}
+
+scen1 = rbind(rbind(read_csv("./Results/ex_s1_m1.csv"),
+      read_csv("./Results/ex_s1_m2.csv"),
+      read_csv("./Results/ex_s1_m3.csv"),
+      read_csv("./Results/ex_s1_m4.csv")) %>%
+    mutate(method = "Exchangeable"),
+
+  rbind(read_csv("./Results/s1_m1.csv"),
+      read_csv("./Results/s1_m2.csv"),
+      read_csv("./Results/s1_m3.csv"),
+      read_csv("./Results/s1_m4.csv")) %>%
+    mutate(method = "FCM")
+)
+
+scen1 %>%
+  ggplot() + 
+  geom_density_ridges(aes(x = rand, y = method, fill = factor(trialnum)), alpha = 0.6) +
+  theme_bw() + 
+  labs(fill = "Number of Trials",
+       x = "Rand Index") +
+  theme(axis.title.y = element_blank(), 
+        legend.position = "bottom")
+
+```
+
+
+
+
+
+
+
+
+
+
+## Same Means Difference in PCs in One Trial Type
+
+### Define Scenario 
+
+```{r}
+
+# define Ws
+coef11 = c(0,0,1,1,0,0,0,0,0,0)
+temp = spline %*% coef11
+pc11 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+coef12 = c(0,0,0,0,1,1,0,0,0,0)
+temp = spline %*% coef12
+pc12 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+coef13 = c(0,0,0,0,0,1,1,0,0,0)
+temp = spline %*% coef13
+pc13 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+temp = rep(1,p)
+pc14 = temp / as.numeric(sqrt(t(temp) %*% temp))
+
+W.t = list()
+W.t[[1]] = list(cbind(pc11, pc13), cbind(pc12, pc14))
+W.t[[2]] = list(cbind(pc11, pc13), cbind(pc14, pc12))
+
+
+# define true mu
+mu.t = list()
+mu.t[[1]] = cbind(rep(1,p), rep(1,p))
+mu.t[[2]] = cbind(rep(1,p), rep(1,p))
+
+
+# define true lambda
+lambda.t = list()
+lambda.t[[1]] = list(c(6,2), c(6,2))
+lambda.t[[2]] = list(c(6,2), c(6,2))
+
+
+# simulate data
+sims = simulate_data(n = 50, m = 20, t = t,
+            pi = c(0.5,0.5), rho = c(0.5, 0.5),
+            mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.002)
+
+sims$X %>%
+  mutate(subj = factor(subj),
+         trial_type = str_c("Condition ", trial_type),
+         subjclus = str_c("Cluster ", subjclus)) %>%
+  ggplot() +
+  geom_line(aes(x = t, y = y, group = interaction(subj, trial_type, trial)), alpha = 0.2, size = 0.4) +
+  facet_grid(cols = vars(trial_type), rows =  vars(subjclus)) +
+  theme_bw() +
+  theme(legend.position = "none",
+        legend.title = element_blank()) +
+  labs(x = "Time", y = "Simulated Activation") +
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+ggsave("./Figures/simset2.png", width = 6, height = 4)
+
+```
+
+## Scenario 2: Exchangeable Clustering
+
+```{r, eval = FALSE}
+
+trialnum = c(10, 20, 40, 80); randlist = list()
+for(j in 1:length(trialnum)) {
+
+  for(i in 1:100) {
+
+    # simulate data
+    sims = simulate_data(n = 50, m = trialnum[j], t = t,
+                pi = c(0.5,0.5), rho = c(0.5, 0.5),
+                mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.002)
+
+    sm = sims$X %>%
+      pivot_wider(id_cols = c(subj, trial, trial_type),
+                  names_from = t, values_from = y, names_prefix = "t")
+
+    matsm = sm %>%
+      dplyr::select(-c(subj, trial, trial_type)) %>%
+      as.matrix()
+
+    fpca_sm = fpca.face(Y = matsm, pve = .95)
+
+    clusex = sm %>%
+      mutate(clusex = kmeans(fpca_sm$scores, 2)$cluster) %>%
+      dplyr::select(subj, trial, trial_type, clusex) %>%
+      group_by(subj) %>%
+      summarise(m = mean(clusex)) %>%
+      ungroup() %>%
+      mutate(clus = ifelse(m <= 1.5, 1, 2)) %>%
+      pull(clus)
+
+    randlist[[i]] = tibble(iter = i, trialnum = trialnum[j], 
+                           rand = rand.index(sims$clus, clusex),
+                           scenario = 2)
+    print(i)
+
+  }
+  randtib = do.call(rbind, randlist)
+  write_csv(randtib, str_c("./Results/ex_s2_m", j, ".csv"))
+
+}
+
+```
+
+
+
+## Scenario 2: Iterate Across Trial Numbers
+
+```{r, eval = FALSE}
+
+trialnum = c(10, 20, 40, 80); randlist = list()
+for(j in 4:length(trialnum)) {
+
+  simslist = list()
+  for(i in 1:100) {
+
+    # simulate data
+    sims = simulate_data(n = 50, m = trialnum[j], t = t,
+                pi = c(0.5,0.5), rho = c(0.5, 0.5),
+                mu = mu.t, W = W.t, lambda = lambda.t, sigma2 = 0.002)
+
+    res = EM(sims$X, 2, 0.00001, cov.knots = 10, mu.knots = 10)
+
+    randlist[[i]] = tibble(iter = i, trialnum = trialnum[j],
+                           rand = rand.index(sims$clus, res$clus),
+                           scenario = 2)
+    print(i)
+
+  }
+  randtib = do.call(rbind, randlist)
+  write_csv(randtib, str_c("./Results/s2_m", j, ".csv"))
+
+}
+
+```
+
+
+## Plot All Scenarios
+
+```{r}
+
+scen2 = rbind(rbind(read_csv("./Results/ex_s2_m1.csv"),
+      read_csv("./Results/ex_s2_m2.csv"),
+      read_csv("./Results/ex_s2_m3.csv"),
+      read_csv("./Results/ex_s2_m4.csv")) %>%
+    mutate(method = "Exchangeable"),
+
+  rbind(read_csv("./Results/s2_m1.csv"),
+      read_csv("./Results/s2_m2.csv"),
+      read_csv("./Results/s2_m3.csv"),
+      read_csv("./Results/s2_m4.csv")) %>%
+    mutate(method = "FCM")
+)
+
+
+# rbind(scen1, scen2) %>%
+#   mutate(scenario = str_c("Scenario ", scenario)) %>%
+#   ggplot() + 
+#   geom_density_ridges(aes(x = rand, y = method, fill = factor(trialnum)), alpha = 0.7) +
+#   theme_classic() + 
+#   facet_wrap(~ scenario) +
+#   labs(fill = "Number of Trials",
+#        x = "Rand Index") +
+#   theme(axis.title.y = element_blank(), 
+#         legend.position = "bottom")
+
+
+rbind(scen1, scen2) %>%
+  mutate(scenario = str_c("Scenario ", scenario)) %>%
+  mutate(method = ifelse(method == "Exchangeable", "Echangeable Clustering", "Unit-Level Clustering")) %>%
+  ggplot() + 
+  geom_boxplot(aes(x = method, y = rand, fill = factor(trialnum))) +
+  theme_classic() + 
+  facet_wrap(~ scenario) +
+  labs(fill = "Number of Trials",
+       y = "Rand Index") +
+  theme(axis.title.x = element_blank(), 
+        legend.position = "bottom")
+
+ggsave("./Figures/res_boxplot.png", width = 7.5, height = 4)
+
+```
+
+
+
+
+
+```{r}
+
+randdat %>%
+  mutate(scenario = str_c("Scenario ", scenario)) %>%
+  ggplot() + 
+  geom_density_ridges(aes(x = rand, y = scenario, fill = factor(trialnum)), alpha = 0.6) +
+  theme_bw() + 
+  labs(fill = "Number of Trials",
+       x = "Rand Index") +
+  theme(axis.title.y = element_blank(), 
+        legend.position = "bottom")
+
+ggsave("./Figures/simres.png", width = 6.5, height = 5.5)
+
+
+```
+
+
+
+
+
+
+# rbind(tibble(pc = 1, clus = 1, type = 1, t = t, val = pc11),
+#       tibble(pc = 2, clus = 1, type = 1, t = t, val = pc13),
+#       tibble(pc = 1, clus = 1, type = 2, t = t, val = pc12),
+#       tibble(pc = 2, clus = 1, type = 2, t = t, val = pc14),
+#       tibble(pc = 1, clus = 2, type = 1, t = t, val = pc13),
+#       tibble(pc = 2, clus = 2, type = 1, t = t, val = pc11),
+#       tibble(pc = 1, clus = 2, type = 2, t = t, val = pc14),
+#       tibble(pc = 2, clus = 2, type = 2, t = t, val = pc12)) %>%
+#   mutate(clus = str_c("Cluster ", clus),
+#          type = str_c("Scenario ", type),
+#          pc = str_c("Component ", pc)) %>%
+#   ggplot() + 
+#   geom_line(aes(x = t, y = val, group = pc, color = pc), size = 0.8) +
+#   facet_grid(cols = vars(clus), rows = vars(type)) +
+#   theme_bw() +
+#   theme(axis.title.y = element_blank(),
+#         legend.position = "bottom",
+#         legend.title = element_blank()) +
+#   labs(x = "Time")
+# 
+# ggsave("./Figures/simpc1.png", width = 5.5, height = 4)
+
